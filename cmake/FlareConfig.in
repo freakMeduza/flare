@@ -1,0 +1,6 @@
+// the configured options and settings for flare
+#define flare_PROJECT			"@PROJECT_NAME@"
+#define flare_REVISION			"@flare_GIT_REVISION@"
+#define flare_VERSION_MAJOR		@flare_VERSION_MAJOR@
+#define flare_VERSION_MINOR		@flare_VERSION_MINOR@
+#define flare_VERSION_PATCH		@flare_VERSION_PATCH@
