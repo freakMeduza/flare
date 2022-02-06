@@ -17,7 +17,7 @@ namespace fve {
 		instanceCount_{ instanceCount },
 		usageFlags_{ usageFlags }
 	{
-		buffer_ = device_.createBuffer(instanceSize, instanceCount, usageFlags, memoryPropertyFlags);
+		buffer_ = device_.createBuffer(instanceSize, instanceCount, usageFlags_, memoryPropertyFlags);
 	}
 
 	Buffer::~Buffer() noexcept {

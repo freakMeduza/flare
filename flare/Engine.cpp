@@ -32,7 +32,6 @@ namespace fve {
 
 	struct GlobalConstant {
 		glm::vec2 resolution;
-		glm::vec2 mouse;
 		float time;
 	};
 
@@ -262,10 +261,72 @@ namespace fve {
 			}
 			catch (const vk::SystemError& err) {
 				Log_error("failed to create vulkan pipeline layout. error {}", err.what());
-				throw;
+				return false;
 			}
 
-			reset();
+			int w, h;
+			glfwGetFramebufferSize(window_, &w, &h);
+			swapchain_ = std::make_unique<Swapchain>(*device_, vk::Extent2D{ static_cast<uint32_t>(w), static_cast<uint32_t>(h) });
+
+			const auto& canvasSource = R"glsl(
+				#version 450
+				#extension GL_ARB_separate_shader_objects : enable
+				
+				layout(location = 0) in vec3 inPos;
+				
+				void main() {
+				    gl_Position = vec4(inPos, 1.0);
+				}
+			)glsl";
+
+			auto vert = createShaderFromSource("canvas.vert", canvasSource, vk::ShaderStageFlagBits::eVertex);
+
+			auto frag = getShader(settings.shader);
+			if (!frag) {
+				const auto& defaultSource = R"glsl(
+					#version 450
+					#extension GL_ARB_separate_shader_objects : enable
+					
+					layout(location = 0) out vec4 fragColor;
+
+					layout(push_constant) uniform globalConstant {
+					    vec2 resolution;
+						float time;
+					} global;
+					
+					void main() {
+						vec3 col = vec3((0.5*sin(global.time) + 0.5), (0.5*cos(global.time) + 0.5), 0.8);
+						
+					    fragColor = vec4(col, 1.0);
+					}
+				)glsl";
+
+				frag = createShaderFromSource("default.frag", defaultSource, vk::ShaderStageFlagBits::eFragment);
+			}
+
+			Pipeline::Settings pipelineSettings{};
+			Pipeline::defaultPipelineSettings(pipelineSettings);
+			pipelineSettings.pipelineLayout = *pipelineLayout_;
+			pipelineSettings.renderPass = swapchain_->renderPass();
+			pipelineSettings.bindingDescriptions = Mesh::Vertex::bindingDescriptions();
+			pipelineSettings.attributeDescriptions = Mesh::Vertex::attributeDescriptions();
+
+			pipeline_ = std::make_unique<Pipeline>(*device_, std::vector<std::shared_ptr<Shader>>{vert, frag}, pipelineSettings);
+
+			commandBuffers_.resize(swapchain_->size());
+
+			vk::CommandBufferAllocateInfo commandBufferAllocateInfo{};
+			commandBufferAllocateInfo.setCommandPool(device_->commandPool());
+			commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
+			commandBufferAllocateInfo.setCommandBufferCount(static_cast<uint32_t>(commandBuffers_.size()));
+
+			try {
+				commandBuffers_ = device_->logical().allocateCommandBuffers(commandBufferAllocateInfo);
+			}
+			catch (const vk::SystemError& err) {
+				Log_error("failed to allocate vulkan command buffers. error {}", err.what());
+				return false;
+			}
 
 			return true;
 		}
@@ -320,8 +381,10 @@ namespace fve {
 	}
 
 	vk::CommandBuffer Engine::beginFrame() noexcept {
-		if (swapchain_->acquireNextImage(currentImageIndex_) != vk::Result::eSuccess)
-			throw std::runtime_error{ "failed to acquire next image from the swapchain" };
+		if (swapchain_->acquireNextImage(currentImageIndex_) != vk::Result::eSuccess) {
+			Log_error("failed to acquire next image from the swapchain");
+			return {};
+		}
 		auto cb = commandBuffers_[currentImageIndex_];
 		try {
 			cb.begin(vk::CommandBufferBeginInfo{});
@@ -362,11 +425,11 @@ namespace fve {
 		}
 		catch (const vk::SystemError& err) {
 			Log_error("failed to end command buffer. error {}", err.what());
-			throw;
+			return;
 		}
 
-		if (swapchain_->submit(commandBuffer, currentImageIndex_) != vk::Result::eSuccess)
-			throw std::runtime_error{ "failed to submit command buffer" };
+		if (swapchain_->submit(commandBuffer, currentImageIndex_) != vk::Result::eSuccess) 
+			Log_error("failed to submit command buffer");
 	}
 
 	void Engine::drawFrame(vk::CommandBuffer commandBuffer) {
@@ -384,74 +447,14 @@ namespace fve {
 		commandBuffer.setViewport(0, viewport);
 		commandBuffer.setScissor(0, scissor);
 
-		double x, y;
-		glfwGetCursorPos(window_, &x, &y);
-		double time = glfwGetTime();
-
 		GlobalConstant global{};
 		global.resolution = { viewport.width, viewport.height };
-		global.mouse = { static_cast<float>(x),static_cast<float>(y) };
-		global.time = static_cast<float>(time);
+		global.time = static_cast<float>(glfwGetTime());
 
 		commandBuffer.pushConstants(*pipelineLayout_, vk::ShaderStageFlagBits::eFragment, 0, sizeof(GlobalConstant), &global);
 
 		canvas_->bind(commandBuffer);
 		canvas_->draw(commandBuffer);
-	}
-
-	void Engine::reset() {
-		device_->logical().waitIdle();
-
-		if (!commandBuffers_.empty())
-			device_->logical().freeCommandBuffers(device_->commandPool(), commandBuffers_);
-
-		pipeline_.reset(nullptr);
-
-		int w, h;
-		glfwGetFramebufferSize(window_, &w, &h);
-		swapchain_ = std::make_unique<Swapchain>(*device_, vk::Extent2D{ static_cast<uint32_t>(w), static_cast<uint32_t>(h) });
-
-		const auto& canvasSource = R"glsl(
-			#version 450
-			#extension GL_ARB_separate_shader_objects : enable
-			
-			layout(location = 0) in vec3 inPos;
-			
-			void main() {
-			    gl_Position = vec4(inPos, 1.0);
-			}
-        )glsl";
-
-		auto vert = createShaderFromSource("canvas.vert", canvasSource, vk::ShaderStageFlagBits::eVertex);
-		if (!vert)
-			throw std::runtime_error{ "failed to initialize engine. failed to build canvas.vert from source" };
-		auto frag = getShader(settings.shader);
-		if (!frag)
-			throw std::runtime_error{ "failed to initialize engine. fragment shader is not found" };
-
-		Pipeline::Settings pipelineSettings{};
-		Pipeline::defaultPipelineSettings(pipelineSettings);
-		pipelineSettings.pipelineLayout = *pipelineLayout_;
-		pipelineSettings.renderPass = swapchain_->renderPass();
-		pipelineSettings.bindingDescriptions = Mesh::Vertex::bindingDescriptions();
-		pipelineSettings.attributeDescriptions = Mesh::Vertex::attributeDescriptions();
-
-		pipeline_ = std::make_unique<Pipeline>(*device_, std::vector<std::shared_ptr<Shader>>{vert, frag}, pipelineSettings);
-
-		commandBuffers_.resize(swapchain_->size());
-
-		vk::CommandBufferAllocateInfo commandBufferAllocateInfo{};
-		commandBufferAllocateInfo.setCommandPool(device_->commandPool());
-		commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-		commandBufferAllocateInfo.setCommandBufferCount(static_cast<uint32_t>(commandBuffers_.size()));
-
-		try {
-			commandBuffers_ = device_->logical().allocateCommandBuffers(commandBufferAllocateInfo);
-		}
-		catch (const vk::SystemError& err) {
-			Log_error("failed to allocate vulkan command buffers. error {}", err.what());
-			throw;
-		}
 	}
 
 }

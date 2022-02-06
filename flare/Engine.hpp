@@ -94,26 +94,6 @@ namespace fve {
 
 		int32_t run() noexcept;
 
-		template<typename T>
-		auto getSystem() const noexcept {
-			try {
-				auto it = std::find_if(systems_.begin(), systems_.end(), [](const std::unique_ptr<System>& other) { 
-					return typeid(T).hash_code() == typeid(*other.get()).hash_code(); 
-				});
-				if (it != systems_.end())
-					return static_cast<T*>((*it).get());
-				Log_error("failed to get system {}. system {} doesn't exist", typeid(T).name(), typeid(T).name());
-				return (T*)nullptr;
-			}
-			catch (const std::exception& ex) {
-				Log_error("failed to get system {}. error", typeid(T).name(), ex.what());
-			}
-			catch (...) {
-				Log_error("failed to get system {}. unknown error", typeid(T).name());
-			}
-			return (T*)nullptr;
-		}
-
 		Settings settings;
 
 		std::shared_ptr<Shader> getShader(const std::string& shaderName) noexcept;
@@ -142,7 +122,6 @@ namespace fve {
 		void endRenderPass(vk::CommandBuffer commandBuffer) noexcept;
 		void endFrame(vk::CommandBuffer commandBuffer) noexcept;
 		void drawFrame(vk::CommandBuffer commandBuffer);
-		void reset();
 
 		GLFWwindow* window_ = nullptr;
 		std::unique_ptr<Device> device_ = nullptr;
