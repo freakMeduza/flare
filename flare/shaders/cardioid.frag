@@ -5,7 +5,6 @@ layout(location = 0) out vec4 fragColor;
 
 layout(push_constant) uniform globalConstant {
     vec2 resolution;
-	vec2 mouse;
 	float time;
 } global;
 

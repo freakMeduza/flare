@@ -31,8 +31,8 @@ namespace fve {
 	static Engine* engineInstance = nullptr;
 
 	struct GlobalConstant {
-		glm::vec2 resolution;
-		float time;
+		alignas(16) glm::vec2 resolution;
+		alignas(16) float time;
 	};
 
 	Engine::Engine(int /*argc*/, char** /*argv*/) {
